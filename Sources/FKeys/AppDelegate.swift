@@ -163,7 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let quit = menu.addItem(withTitle: "Quit FKeys", action: #selector(menuQuit), keyEquivalent: "q")
         quit.target = self
 
-        refresh()
+        // Fill the state line from the instant local value, then let the
+        // background read correct it. The menu must never wait on HID.
+        render(functionKeys: FnKeyMode.storedPreference)
+        refreshFromHardware()
 
         // Attaching the menu and clicking is the supported way to pop a menu
         // from a status item that also handles plain clicks.
