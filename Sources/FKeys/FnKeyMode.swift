@@ -32,18 +32,22 @@ enum FnKeyMode {
         let detail: String
     }
 
-    /// True when F1-F12 act as plain function keys.
+    /// True when F1-F12 act as plain function keys, according to the hardware.
     ///
-    /// Read from the hardware where possible, so the menu bar letter cannot
-    /// drift away from reality. Falls back to the stored preference only when
-    /// no keyboard will answer.
+    /// **Never call this on the main thread during launch.** Talking to the HID
+    /// layer means waiting on another process, and if that wait is slow the
+    /// menu bar item is created but never gets a title drawn, so it renders as
+    /// a zero width sliver and looks exactly like the app failing to start.
+    /// Use `storedPreference` for the first paint and refresh from here in the
+    /// background.
     static var isFunctionKeyMode: Bool {
         if let live = HIDServices.fKeyMode() { return live }
         if let live = HIDDevices.fKeyMode() { return live }
         return storedPreference
     }
 
-    private static var storedPreference: Bool {
+    /// Instant, no interprocess call. Good enough to paint the letter with.
+    static var storedPreference: Bool {
         CFPreferencesAppSynchronize(prefDomain)
         var valid: DarwinBoolean = false
         let value = CFPreferencesGetAppBooleanValue(prefKey, prefDomain, &valid)

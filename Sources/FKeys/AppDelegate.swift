@@ -37,16 +37,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HotKeyCenter.shared.onTrigger = { [weak self] in self?.toggle() }
         HotKeyCenter.shared.start()
 
-        refresh()
+        // Paint the letter from the stored preference straight away. This costs
+        // nothing and guarantees the item has a visible title before anything
+        // slow happens.
+        render(functionKeys: FnKeyMode.storedPreference)
+        refreshFromHardware()
     }
 
     // MARK: - Display
 
     /// F when F1-F12 are plain function keys, C when they are the printed
     /// controls. Both letters are white; the letter itself carries the state.
-    private func refresh() {
+    /// Asks the hardware what it really thinks, off the main thread, then
+    /// repaints. Kept off the main thread because a HID round trip waits on
+    /// another process and a stalled main thread means an item with no title,
+    /// which is indistinguishable from the app not running.
+    private func refreshFromHardware() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let live = FnKeyMode.isFunctionKeyMode
+            DispatchQueue.main.async { [weak self] in self?.render(functionKeys: live) }
+        }
+    }
+
+    private func render(functionKeys fn: Bool) {
         guard let button = statusItem.button else { return }
-        let fn = FnKeyMode.isFunctionKeyMode
         let letter = fn ? "F" : "C"
 
         button.attributedTitle = NSAttributedString(string: letter, attributes: [
@@ -72,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func externalChange() {
-        DispatchQueue.main.async { [weak self] in self?.refresh() }
+        refreshFromHardware()
     }
 
     // MARK: - Actions
@@ -85,10 +99,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func toggle() {
-        let outcome = FnKeyMode.toggle()
-        refresh()
-        guard !outcome.succeeded else { return }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let outcome = FnKeyMode.toggle()
+            let live = FnKeyMode.isFunctionKeyMode
+            DispatchQueue.main.async { [weak self] in
+                self?.render(functionKeys: live)
+                if !outcome.succeeded { self?.reportFailure() }
+            }
+        }
+    }
 
+    private func reportFailure() {
         let alert = NSAlert()
         alert.messageText = "The function keys did not change"
         alert.informativeText = """

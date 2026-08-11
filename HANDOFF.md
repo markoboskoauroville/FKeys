@@ -3,6 +3,19 @@
 Public repo. macOS menu bar app, one click switches F1-F12 between function
 keys and media controls.
 
+## Never touch HID on the launch path
+
+**The status item must have a visible title before any HID call happens.**
+
+A HID read waits on another process. If that wait is slow, `applicationDidFinishLaunching` has already created the `NSStatusItem` but has not yet given its button a title, so the item renders as a zero width sliver. The app is running perfectly and the menu bar looks empty. This shipped once and read as a crash.
+
+The launch path therefore paints from `FnKeyMode.storedPreference`, which is a
+local preference read and instant, then `refreshFromHardware()` does the real
+read on a background queue and repaints. Toggling goes through the same split.
+
+`render(functionKeys:)` is the only thing that writes the title, and it is
+always called on the main thread with a value already in hand.
+
 ## Three layers, only one of which works on Apple Silicon
 
 **IOHIDSystem accepts the write, returns KERN_SUCCESS, and does nothing.** That
