@@ -163,8 +163,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 action: #selector(menuDiagnostics), keyEquivalent: "")
         diag.target = self
 
-        if HIDSafety.privatePathDisabled {
-            let reenable = menu.addItem(withTitle: "Retry advanced keyboard access",
+        if !HIDSafety.disabledStages.isEmpty {
+            let reenable = menu.addItem(withTitle: "Retry disabled keyboard methods",
                                         action: #selector(menuReenable), keyEquivalent: "")
             reenable.target = self
         }
@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func menuDiagnostics() { copyDiagnostics() }
 
     @objc private func menuReenable() {
-        HIDSafety.reenable()
+        HIDSafety.reset()
         refreshFromHardware()
     }
     @objc private func menuQuit() { NSApp.terminate(nil) }

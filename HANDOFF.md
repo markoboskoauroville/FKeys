@@ -3,7 +3,27 @@
 Public repo. macOS menu bar app, one click switches F1-F12 between function
 keys and media controls.
 
-## The crash fuse
+## The crash fuse, per stage
+
+**The click traps, the launch does not.** Reading the mode works on his Mac;
+writing it kills the process with SIGTRAP and no message, which points at a
+system framework calling `__builtin_trap` rather than a Swift error.
+
+The first fuse guarded only the enumeration, so the flag was always cleared
+before the fatal write and it could never trip. `HIDSafety` is now per stage:
+`hidutil.write`, `devices.enumerate/write/read`, `services.enumerate/write/read`,
+`legacy.write`. Every risky call is wrapped individually. A stage that kills the
+app is disabled permanently at the next launch and the others carry on, so the
+worst case is one crash per bad stage and the diagnostics then name it.
+
+`HIDSafety.inspectPreviousRun()` must stay the first statement in
+`applicationDidFinishLaunching`.
+
+Order of attempts in `set` is deliberate: **`/usr/bin/hidutil` first**, because
+it runs in a separate process and cannot take FKeys down whatever happens. Only
+then the in-process routes.
+
+## Old notes on the single fuse
 
 `HIDSafety` writes a flag to `UserDefaults` and forces it to disk immediately
 before entering the private symbol path, and clears it immediately after. If the

@@ -1,49 +1,72 @@
 import Foundation
 
-/// A crash fuse around the private HID calls.
+/// A per stage crash fuse.
 ///
-/// `HIDServices` resolves undocumented symbols by name and calls them. That is
-/// the only route that actually works on Apple Silicon, but it is exactly the
-/// kind of code that can take the whole process down on some future macOS, and
-/// a menu bar app that dies at launch leaves the user with nothing to click and
-/// no way to fix it.
+/// Several different layers can be asked to change the function key mode, and
+/// any one of them may trap on a given macOS. A flag naming the stage about to
+/// run is forced to disk before entering it and cleared immediately after. If a
+/// stage name is still on disk at the next launch, that stage killed the app
+/// last time, so it is disabled permanently and the others carry on.
 ///
-/// So: a flag is written to disk immediately before entering that code and
-/// cleared immediately after. If the flag is still set at the next launch, the
-/// app did not survive the last attempt, and the private path is switched off
-/// permanently in favour of the public one. Worst case it crashes once and then
-/// heals itself.
+/// The earlier version guarded only the enumeration and not the write, so the
+/// flag was always cleared before the fatal call and the fuse could never trip.
+/// Every call into a risky layer now goes through `guarded`.
 enum HIDSafety {
-    private static let inFlightKey = "hid.privateProbeInFlight"
-    private static let disabledKey = "hid.privateDisabled"
+    private static let inFlightKey = "hid.stageInFlight"
+    private static let disabledKey = "hid.disabledStages"
     private static let defaults = UserDefaults.standard
 
-    static var privatePathDisabled: Bool { defaults.bool(forKey: disabledKey) }
-
-    /// Call once, first thing, before anything touches HID.
-    static func inspectPreviousRun() {
-        guard defaults.bool(forKey: inFlightKey) else { return }
-        defaults.set(true, forKey: disabledKey)
-        defaults.set(false, forKey: inFlightKey)
-        NSLog("FKeys: previous launch died inside the private HID path, disabling it")
+    enum Stage: String, CaseIterable {
+        case hidutilWrite      = "hidutil.write"
+        case devicesEnumerate  = "devices.enumerate"
+        case devicesWrite      = "devices.write"
+        case devicesRead       = "devices.read"
+        case servicesEnumerate = "services.enumerate"
+        case servicesWrite     = "services.write"
+        case servicesRead      = "services.read"
+        case legacyWrite       = "legacy.write"
     }
 
-    /// Runs `work` with the fuse armed. Returns `fallback` without running
-    /// anything once the path has been disabled.
-    static func guarded<T>(fallback: T, _ work: () -> T) -> T {
-        guard !privatePathDisabled else { return fallback }
-        defaults.set(true, forKey: inFlightKey)
-        // Forced to disk now, because the point is surviving a hard crash on
-        // the very next line.
+    static var disabledStages: Set<String> {
+        Set(defaults.stringArray(forKey: disabledKey) ?? [])
+    }
+
+    static func isDisabled(_ stage: Stage) -> Bool {
+        disabledStages.contains(stage.rawValue)
+    }
+
+    /// Call once, first thing at launch, before anything touches HID.
+    static func inspectPreviousRun() {
+        guard let stage = defaults.string(forKey: inFlightKey), !stage.isEmpty else { return }
+        var disabled = disabledStages
+        disabled.insert(stage)
+        defaults.set(Array(disabled).sorted(), forKey: disabledKey)
+        defaults.removeObject(forKey: inFlightKey)
+        defaults.synchronize()
+        NSLog("FKeys: stage \(stage) killed the previous launch, disabling it")
+    }
+
+    static func guarded<T>(_ stage: Stage, fallback: T, _ work: () -> T) -> T {
+        guard !isDisabled(stage) else { return fallback }
+        defaults.set(stage.rawValue, forKey: inFlightKey)
+        // Forced to disk now: the whole point is surviving a hard crash on the
+        // very next line.
         defaults.synchronize()
         let result = work()
-        defaults.set(false, forKey: inFlightKey)
+        defaults.removeObject(forKey: inFlightKey)
         defaults.synchronize()
         return result
     }
 
-    static func reenable() {
-        defaults.set(false, forKey: disabledKey)
-        defaults.set(false, forKey: inFlightKey)
+    static func reset() {
+        defaults.removeObject(forKey: disabledKey)
+        defaults.removeObject(forKey: inFlightKey)
+        defaults.synchronize()
+    }
+
+    static var report: String {
+        let disabled = disabledStages
+        guard !disabled.isEmpty else { return "no stages disabled" }
+        return "disabled after crashing: " + disabled.sorted().joined(separator: ", ")
     }
 }

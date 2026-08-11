@@ -57,15 +57,31 @@ enum FnKeyMode {
     @discardableResult
     static func set(_ functionKeys: Bool) -> Outcome {
         var notes: [String] = []
+        var wrote = 0
 
-        let services = HIDServices.setFKeyMode(functionKeys)
-        notes.append("event system services written: \(services)")
+        // hidutil first, because it runs in another process and therefore
+        // cannot take this one down. Everything after it runs inside FKeys and
+        // is fused individually.
+        if let output = HIDUtilBridge.setFKeyMode(functionKeys) {
+            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            notes.append("hidutil: \(trimmed.isEmpty ? "no output" : trimmed)")
+            wrote += 1
+        } else {
+            notes.append("hidutil: could not run")
+        }
 
         let devices = HIDDevices.setFKeyMode(functionKeys)
         notes.append("hid manager devices written: \(devices)")
+        wrote += devices
 
-        let legacy = setViaIOHIDSystem(functionKeys)
-        notes.append("legacy IOHIDSystem: \(legacy ? "accepted" : "refused")")
+        let services = HIDServices.setFKeyMode(functionKeys)
+        notes.append("event system services written: \(services)")
+        wrote += services
+
+        let legacy = HIDSafety.guarded(.legacyWrite, fallback: false) {
+            setViaIOHIDSystem(functionKeys)
+        }
+        notes.append("legacy IOHIDSystem: \(legacy ? "accepted" : "refused or skipped")")
 
         // Persist regardless, so the setting survives a reboot and the System
         // Settings checkbox agrees with whatever the hardware now reports.
@@ -88,10 +104,9 @@ enum FnKeyMode {
         }
 
         notes.append("read back: no keyboard answered")
-        // Nothing could be verified either way. Treat a service or device
-        // accepting the write as success rather than alarming the user.
-        return Outcome(succeeded: services > 0 || devices > 0,
-                       detail: notes.joined(separator: "\n"))
+        // Nothing could be verified either way. Treat any layer accepting the
+        // write as success rather than alarming the user.
+        return Outcome(succeeded: wrote > 0, detail: notes.joined(separator: "\n"))
     }
 
     @discardableResult
@@ -130,7 +145,9 @@ enum FnKeyMode {
         var lines: [String] = ["FKeys diagnostics"]
         lines.append("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         lines.append("event system symbols available: \(HIDServices.isAvailable)")
-        lines.append("private path disabled after a crash: \(HIDSafety.privatePathDisabled)")
+        lines.append("hidutil present: \(HIDUtilBridge.isAvailable)")
+        lines.append("hidutil reports: \(describe(HIDUtilBridge.readFKeyMode()))")
+        lines.append(HIDSafety.report)
         lines.append("keyboard services seen: \(HIDServices.keyboardCount())")
         lines.append("hid manager keyboards seen: \(HIDDevices.keyboardCount())")
         lines.append("service reports: \(describe(HIDServices.fKeyMode()))")

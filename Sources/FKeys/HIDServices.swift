@@ -39,8 +39,7 @@ enum HIDServices {
         symbol("IOHIDServiceClientConformsTo", as: ServiceConformsTo.self)
 
     static var isAvailable: Bool {
-        !HIDSafety.privatePathDisabled
-            && createClient != nil && copyServices != nil && setProperty != nil
+        createClient != nil && copyServices != nil && setProperty != nil
     }
 
     /// Keyboard services only: usage page 1 (generic desktop), usage 6 (keyboard).
@@ -49,12 +48,11 @@ enum HIDServices {
     /// crash in here disables this whole path on the next launch instead of
     /// leaving an app that cannot start.
     private static func keyboardServices() -> [CFTypeRef] {
-        HIDSafety.guarded(fallback: []) { unguardedKeyboardServices() }
+        HIDSafety.guarded(.servicesEnumerate, fallback: []) { unguardedKeyboardServices() }
     }
 
     private static func unguardedKeyboardServices() -> [CFTypeRef] {
-        guard !HIDSafety.privatePathDisabled,
-              let createClient, let copyServices,
+        guard let createClient, let copyServices,
               let client = createClient(kCFAllocatorDefault)?.takeRetainedValue(),
               let all = copyServices(client)?.takeRetainedValue() as? [CFTypeRef]
         else { return [] }
@@ -67,14 +65,21 @@ enum HIDServices {
     @discardableResult
     static func setFKeyMode(_ on: Bool) -> Int {
         guard let setProperty else { return 0 }
-        var raw: Int32 = on ? 1 : 0
-        guard let number = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &raw) else { return 0 }
+        let services = keyboardServices()
+        guard !services.isEmpty else { return 0 }
 
-        var accepted = 0
-        for service in keyboardServices() where setProperty(service, "HIDFKeyMode" as CFString, number) {
-            accepted += 1
+        // The write is fused separately from the enumeration. Enumerating is
+        // known to work on this Mac while the write is the call that traps, and
+        // one fuse around both would clear before the fatal line.
+        return HIDSafety.guarded(.servicesWrite, fallback: 0) {
+            var raw: Int32 = on ? 1 : 0
+            guard let number = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &raw) else { return 0 }
+            var accepted = 0
+            for service in services where setProperty(service, "HIDFKeyMode" as CFString, number) {
+                accepted += 1
+            }
+            return accepted
         }
-        return accepted
     }
 
     /// The value the hardware actually holds, or nil when nothing could be read.
@@ -82,12 +87,16 @@ enum HIDServices {
     /// then ignored, so the answer has to be read back.
     static func fKeyMode() -> Bool? {
         guard let copyProperty else { return nil }
-        for service in keyboardServices() {
-            guard let value = copyProperty(service, "HIDFKeyMode" as CFString)?.takeRetainedValue(),
-                  let number = value as? NSNumber else { continue }
-            return number.intValue != 0
+        let services = keyboardServices()
+        guard !services.isEmpty else { return nil }
+        return HIDSafety.guarded(.servicesRead, fallback: nil) {
+            for service in services {
+                guard let value = copyProperty(service, "HIDFKeyMode" as CFString)?.takeRetainedValue(),
+                      let number = value as? NSNumber else { continue }
+                return number.intValue != 0
+            }
+            return nil
         }
-        return nil
     }
 
     static func keyboardCount() -> Int { keyboardServices().count }
@@ -102,6 +111,10 @@ enum HIDServices {
 enum HIDDevices {
 
     private static func keyboards() -> [IOHIDDevice] {
+        HIDSafety.guarded(.devicesEnumerate, fallback: []) { unguardedKeyboards() }
+    }
+
+    private static func unguardedKeyboards() -> [IOHIDDevice] {
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let match: [String: Any] = [
             kIOHIDDeviceUsagePageKey: 0x01,
@@ -114,23 +127,31 @@ enum HIDDevices {
 
     @discardableResult
     static func setFKeyMode(_ on: Bool) -> Int {
-        var raw: Int32 = on ? 1 : 0
-        guard let number = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &raw) else { return 0 }
-        var accepted = 0
-        for device in keyboards()
-        where IOHIDDeviceSetProperty(device, "HIDFKeyMode" as CFString, number) {
-            accepted += 1
+        let devices = keyboards()
+        guard !devices.isEmpty else { return 0 }
+        return HIDSafety.guarded(.devicesWrite, fallback: 0) {
+            var raw: Int32 = on ? 1 : 0
+            guard let number = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &raw) else { return 0 }
+            var accepted = 0
+            for device in devices
+            where IOHIDDeviceSetProperty(device, "HIDFKeyMode" as CFString, number) {
+                accepted += 1
+            }
+            return accepted
         }
-        return accepted
     }
 
     static func fKeyMode() -> Bool? {
-        for device in keyboards() {
-            guard let value = IOHIDDeviceGetProperty(device, "HIDFKeyMode" as CFString),
-                  let number = value as? NSNumber else { continue }
-            return number.intValue != 0
+        let devices = keyboards()
+        guard !devices.isEmpty else { return nil }
+        return HIDSafety.guarded(.devicesRead, fallback: nil) {
+            for device in devices {
+                guard let value = IOHIDDeviceGetProperty(device, "HIDFKeyMode" as CFString),
+                      let number = value as? NSNumber else { continue }
+                return number.intValue != 0
+            }
+            return nil
         }
-        return nil
     }
 
     static func keyboardCount() -> Int { keyboards().count }
