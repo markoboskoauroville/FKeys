@@ -39,6 +39,24 @@ models.
 hidutil wants 64, upper half page, lower half usage. `0x000c00e9` becomes
 `0xc000000e9`. Get it wrong and hidutil accepts the number and nothing happens.
 
+## Shell quoting versus Process
+
+`Process` runs the binary directly. There is no shell, so **no quotes are
+stripped for you**.
+
+In a terminal you write `hidutil property --get "UserKeyMapping"` and the shell
+removes those quotes before hidutil sees the key name. Passing the same string
+from Swift hands hidutil a key literally called `"UserKeyMapping"`, quote
+characters included. It matches nothing, hidutil answers `(null)`, and the app
+concludes its own write failed while the keyboard had in fact changed.
+
+The `--set` argument is the opposite case and keeps its inner quotes, because
+hidutil really does want a JSON object there; the single quotes in the terminal
+version are the shell's.
+
+This cost a build. When copying a working terminal command into `Process`, strip
+exactly the quotes the shell would have.
+
 ## Things that will surprise someone later
 
 - **The System Settings checkbox stays unticked** while the keyboard behaves as

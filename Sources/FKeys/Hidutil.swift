@@ -36,6 +36,9 @@ enum Hidutil {
     /// by another tool is lost when FKeys writes.
     @discardableResult
     static func setUserKeyMapping(_ json: String) -> String? {
+        // This argument keeps its quotes: hidutil genuinely wants a JSON
+        // object here, and in a terminal the single quotes around it are the
+        // shell's, not part of the value.
         run(["property", "--set", "{\"UserKeyMapping\":\(json)}"])
     }
 
@@ -44,8 +47,15 @@ enum Hidutil {
     }
 
     /// nil when nothing is mapped. hidutil prints "(null)" in that case.
+    ///
+    /// The key name is passed **bare**. In a terminal you write
+    /// `hidutil property --get "UserKeyMapping"` and the shell strips those
+    /// quotes before hidutil ever sees them. Process runs the binary directly
+    /// with no shell, so quoting it here hands hidutil a key called
+    /// `"UserKeyMapping"` including the quote characters, which matches
+    /// nothing. It answers (null) and the app concludes the write failed.
     static func currentUserKeyMapping() -> String? {
-        guard let output = run(["property", "--get", "\"UserKeyMapping\""]) else { return nil }
+        guard let output = run(["property", "--get", "UserKeyMapping"]) else { return nil }
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty || trimmed.contains("(null)") { return nil }
         return trimmed

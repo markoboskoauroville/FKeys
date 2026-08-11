@@ -42,16 +42,21 @@ enum FnKeyMode {
             ? Hidutil.setUserKeyMapping(FnKeyMap.swapJSON())
             : Hidutil.clearUserKeyMapping()
 
-        guard output != nil else {
+        guard let output else {
             return Outcome(succeeded: false, detail: "hidutil could not be run")
         }
 
-        // Confirm against the system rather than trusting the write. The old
-        // implementation trusted a success code and was wrong for days.
+        // Two independent confirmations, because trusting one signal is exactly
+        // how the previous version came to believe a lie. hidutil echoes the
+        // resulting table from --set, and --get reads it back fresh.
+        let echoed = output.contains("HIDKeyboardModifierMappingSrc")
         let live = isFunctionKeyMode
-        return Outcome(succeeded: live == functionKeys,
+        let agreed = functionKeys ? (live || echoed) : (!live && !echoed)
+
+        return Outcome(succeeded: agreed,
                        detail: "requested \(functionKeys ? "function keys" : "media keys"), "
-                              + "system reports \(live ? "function keys" : "media keys")")
+                              + "set echoed mapping: \(echoed), "
+                              + "read back: \(live ? "function keys" : "media keys")")
     }
 
     @discardableResult
@@ -74,6 +79,8 @@ enum FnKeyMode {
         lines.append("keyboard map: \(FnKeyMap.usedFallback ? "built in fallback" : "read from this Mac")")
         lines.append("pairs found: \(FnKeyMap.pairs().count)")
         lines.append("mapping active: \(isFunctionKeyMode)")
+        lines.append("get returns: \(Hidutil.currentUserKeyMapping()?.prefix(120) ?? "(null)")")
+        lines.append("entries the swap would write: \(FnKeyMap.swapEntries().count)")
         lines.append("last requested: \(desiredFunctionKeys ? "function keys" : "media keys")")
         return lines.joined(separator: "\n")
     }
