@@ -37,23 +37,27 @@ which is why it still needs no Accessibility or Input Monitoring grant.
 
 ## How it works
 
-The setting is written per keyboard through `IOHIDEventSystemClient`, the same
-layer System Settings uses, then persisted to `com.apple.keyboard.fnState` and
-announced with a distributed notification so anything already running re-reads
-it.
+FKeys swaps the top row using **key remapping**, the one keyboard mechanism
+Apple documents, applied through their own `hidutil` tool. Each key's
+pressed-alone code and its with-fn code are exchanged, so F1 to F12 work
+directly and brightness, volume and the rest move onto fn.
 
-This is why `defaults write com.apple.keyboard.fnState` on its own appears to do
-nothing until the next login: it persists the value without ever telling the
-keyboard.
+It reads your Mac's own key table rather than assuming a layout, so it is
+correct on any model.
 
-The older `IOHIDSystem` route that most examples online use is worse than
-useless on Apple Silicon. It accepts the write, returns success, and changes
-nothing. FKeys therefore never trusts a return code: after writing it reads the
-value back out of the hardware, and says so plainly when the two disagree.
-`Copy diagnostics` in the menu reports which layer answered.
+Three other approaches were tried first and all failed on Apple Silicon:
+`defaults write com.apple.keyboard.fnState` persists the value but changes
+nothing until the next login; the old `IOHIDSystem` call accepts the write,
+reports success and does nothing; and the private event system call crashes the
+process outright. None of them are used any more.
 
-FKeys also re-reads the setting after waking from sleep and whenever anything
-else changes it, so the letter never lies.
+**The System Settings checkbox will stay unticked** while your keyboard behaves
+as though it were ticked. FKeys no longer touches that setting, because on this
+hardware it cannot be made to work.
+
+Two consequences worth knowing: hidutil replaces the whole remapping table, so
+a mapping set by another tool is overwritten; and a reboot clears the mapping,
+which FKeys re-applies automatically at launch and after waking.
 
 ## Build from source
 

@@ -1,112 +1,57 @@
 import Foundation
-import IOKit
 
-/// Reads and writes the macOS "Use F1, F2, etc. keys as standard function keys"
-/// setting.
+/// The state FKeys manages: are F1 to F12 plain function keys, or the printed
+/// media and brightness controls.
 ///
-/// There are three ways to reach this setting and they are not equivalent:
+/// This does **not** touch `com.apple.keyboard.fnState`, the setting behind the
+/// System Settings checkbox. That setting is unreachable on Apple Silicon: the
+/// old IOHIDSystem call accepts it and does nothing, hidutil has no such
+/// property, and the private event system call kills the process. Key
+/// remapping is the mechanism Apple documents, and it works.
 ///
-/// - **IOHIDEventSystemClient**, per keyboard service. This is what System
-///   Settings uses and what actually works on Apple Silicon.
-/// - **IOHIDManager**, the public equivalent, writing the same property on the
-///   device. Second attempt, in case the private symbols above ever vanish.
-/// - **IOHIDSystem**, the old single system wide service. On Apple Silicon this
-///   accepts the write, returns success, and does nothing. It is kept only as a
-///   last resort for older Intel Macs.
-///
-/// Because a write can be accepted and silently ignored, nothing here trusts a
-/// return code. The result is confirmed by reading the value back out of the
-/// hardware, and `set` reports failure if the read back disagrees.
+/// The visible consequence is that the System Settings checkbox stays unticked
+/// while the keyboard behaves as though it were ticked. That is expected.
 enum FnKeyMode {
 
-    /// `kIOHIDParamConnectType` from IOKit/hidsystem/IOHIDLib.h. Hardcoded
-    /// because that enum is not surfaced to Swift.
-    private static let paramConnectType: UInt32 = 1
-    private static let hidKey = "HIDFKeyMode" as CFString
-    private static let prefKey = "fnState" as CFString
-    private static let prefDomain = "com.apple.keyboard" as CFString
-    private static let changeNotification = "com.apple.keyboard.fnstatedidchange"
+    private static let desiredKey = "fkeys.functionMode"
+    private static let defaults = UserDefaults.standard
 
     struct Outcome {
         let succeeded: Bool
         let detail: String
     }
 
-    /// True when F1-F12 act as plain function keys, according to the hardware.
-    ///
-    /// **Never call this on the main thread during launch.** Talking to the HID
-    /// layer means waiting on another process, and if that wait is slow the
-    /// menu bar item is created but never gets a title drawn, so it renders as
-    /// a zero width sliver and looks exactly like the app failing to start.
-    /// Use `storedPreference` for the first paint and refresh from here in the
-    /// background.
-    static var isFunctionKeyMode: Bool {
-        if let live = HIDServices.fKeyMode() { return live }
-        if let live = HIDDevices.fKeyMode() { return live }
-        return storedPreference
+    /// What the user last asked for. Survives quitting and rebooting.
+    static var desiredFunctionKeys: Bool {
+        get { defaults.bool(forKey: desiredKey) }
+        set { defaults.set(newValue, forKey: desiredKey) }
     }
 
-    /// Instant, no interprocess call. Good enough to paint the letter with.
-    static var storedPreference: Bool {
-        CFPreferencesAppSynchronize(prefDomain)
-        var valid: DarwinBoolean = false
-        let value = CFPreferencesGetAppBooleanValue(prefKey, prefDomain, &valid)
-        return valid.boolValue ? value : false
+    /// Whether the mapping is live right now, read back from hidutil rather
+    /// than assumed. Cheap: one short subprocess.
+    static var isFunctionKeyMode: Bool {
+        guard let mapping = Hidutil.currentUserKeyMapping() else { return false }
+        return mapping.contains("HIDKeyboardModifierMappingSrc")
     }
 
     @discardableResult
     static func set(_ functionKeys: Bool) -> Outcome {
-        var notes: [String] = []
-        var wrote = 0
+        desiredFunctionKeys = functionKeys
 
-        // hidutil first, because it runs in another process and therefore
-        // cannot take this one down. Everything after it runs inside FKeys and
-        // is fused individually.
-        if let output = HIDUtilBridge.setFKeyMode(functionKeys) {
-            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            notes.append("hidutil: \(trimmed.isEmpty ? "no output" : trimmed)")
-            wrote += 1
-        } else {
-            notes.append("hidutil: could not run")
+        let output = functionKeys
+            ? Hidutil.setUserKeyMapping(FnKeyMap.swapJSON())
+            : Hidutil.clearUserKeyMapping()
+
+        guard output != nil else {
+            return Outcome(succeeded: false, detail: "hidutil could not be run")
         }
 
-        let devices = HIDDevices.setFKeyMode(functionKeys)
-        notes.append("hid manager devices written: \(devices)")
-        wrote += devices
-
-        let services = HIDServices.setFKeyMode(functionKeys)
-        notes.append("event system services written: \(services)")
-        wrote += services
-
-        let legacy = HIDSafety.guarded(.legacyWrite, fallback: false) {
-            setViaIOHIDSystem(functionKeys)
-        }
-        notes.append("legacy IOHIDSystem: \(legacy ? "accepted" : "refused or skipped")")
-
-        // Persist regardless, so the setting survives a reboot and the System
-        // Settings checkbox agrees with whatever the hardware now reports.
-        CFPreferencesSetAppValue(prefKey,
-                                 functionKeys ? kCFBooleanTrue : kCFBooleanFalse,
-                                 prefDomain)
-        CFPreferencesAppSynchronize(prefDomain)
-        DistributedNotificationCenter.default().postNotificationName(
-            Notification.Name(changeNotification),
-            object: nil,
-            userInfo: ["state": functionKeys],
-            deliverImmediately: true)
-
-        // The only answer that counts. A write being accepted proves nothing.
-        let readBack = HIDServices.fKeyMode() ?? HIDDevices.fKeyMode()
-        if let readBack {
-            notes.append("read back: \(readBack ? "function keys" : "media keys")")
-            return Outcome(succeeded: readBack == functionKeys,
-                           detail: notes.joined(separator: "\n"))
-        }
-
-        notes.append("read back: no keyboard answered")
-        // Nothing could be verified either way. Treat any layer accepting the
-        // write as success rather than alarming the user.
-        return Outcome(succeeded: wrote > 0, detail: notes.joined(separator: "\n"))
+        // Confirm against the system rather than trusting the write. The old
+        // implementation trusted a success code and was wrong for days.
+        let live = isFunctionKeyMode
+        return Outcome(succeeded: live == functionKeys,
+                       detail: "requested \(functionKeys ? "function keys" : "media keys"), "
+                              + "system reports \(live ? "function keys" : "media keys")")
     }
 
     @discardableResult
@@ -114,50 +59,22 @@ enum FnKeyMode {
         set(!isFunctionKeyMode)
     }
 
-    // MARK: - Legacy path
-
-    private static func setViaIOHIDSystem(_ on: Bool) -> Bool {
-        guard let matching = IOServiceMatching("IOHIDSystem") else { return false }
-        var iterator: io_iterator_t = 0
-        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iterator) == KERN_SUCCESS
-        else { return false }
-        defer { IOObjectRelease(iterator) }
-
-        let service = IOIteratorNext(iterator)
-        guard service != 0 else { return false }
-        defer { IOObjectRelease(service) }
-
-        var connect: io_connect_t = 0
-        guard IOServiceOpen(service, mach_task_self_, paramConnectType, &connect) == KERN_SUCCESS
-        else { return false }
-        defer { IOServiceClose(connect) }
-
-        var raw: Int32 = on ? 1 : 0
-        guard let number = CFNumberCreate(kCFAllocatorDefault, .sInt32Type, &raw) else { return false }
-        return IOConnectSetCFProperty(connect, hidKey, number) == KERN_SUCCESS
+    /// Key remapping is cleared by a reboot, and by the last keyboard being
+    /// disconnected. Called at launch and after waking so the choice sticks
+    /// without the user having to think about it.
+    static func reapplyIfNeeded() {
+        guard desiredFunctionKeys, !isFunctionKeyMode else { return }
+        _ = Hidutil.setUserKeyMapping(FnKeyMap.swapJSON())
     }
 
-    // MARK: - Diagnostics
-
-    /// A plain text report, for when it still does not work and the only way
-    /// forward is knowing which layer answered.
     static func diagnostics() -> String {
-        var lines: [String] = ["FKeys diagnostics"]
+        var lines = ["FKeys diagnostics"]
         lines.append("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
-        lines.append("event system symbols available: \(HIDServices.isAvailable)")
-        lines.append("hidutil present: \(HIDUtilBridge.isAvailable)")
-        lines.append("hidutil reports: \(describe(HIDUtilBridge.readFKeyMode()))")
-        lines.append(HIDSafety.report)
-        lines.append("keyboard services seen: \(HIDServices.keyboardCount())")
-        lines.append("hid manager keyboards seen: \(HIDDevices.keyboardCount())")
-        lines.append("service reports: \(describe(HIDServices.fKeyMode()))")
-        lines.append("device reports: \(describe(HIDDevices.fKeyMode()))")
-        lines.append("stored preference: \(storedPreference ? "function keys" : "media keys")")
+        lines.append("hidutil present: \(Hidutil.isAvailable)")
+        lines.append("keyboard map: \(FnKeyMap.usedFallback ? "built in fallback" : "read from this Mac")")
+        lines.append("pairs found: \(FnKeyMap.pairs().count)")
+        lines.append("mapping active: \(isFunctionKeyMode)")
+        lines.append("last requested: \(desiredFunctionKeys ? "function keys" : "media keys")")
         return lines.joined(separator: "\n")
-    }
-
-    private static func describe(_ value: Bool?) -> String {
-        guard let value else { return "no answer" }
-        return value ? "function keys" : "media keys"
     }
 }

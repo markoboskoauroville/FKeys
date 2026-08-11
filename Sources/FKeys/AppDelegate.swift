@@ -14,9 +14,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        // Before anything else: if the last launch died inside the private HID
-        // path, turn that path off so this launch survives.
-        HIDSafety.inspectPreviousRun()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.target = self
@@ -41,11 +38,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HotKeyCenter.shared.onTrigger = { [weak self] in self?.toggle() }
         HotKeyCenter.shared.start()
 
-        // Paint the letter from the stored preference straight away. This costs
-        // nothing and guarantees the item has a visible title before anything
-        // slow happens.
-        render(functionKeys: FnKeyMode.storedPreference)
-        refreshFromHardware()
+        // Paint from the remembered choice immediately, so the item always has
+        // a visible title, then confirm against the system in the background.
+        render(functionKeys: FnKeyMode.desiredFunctionKeys)
+        DispatchQueue.global(qos: .userInitiated).async {
+            // A reboot or the last keyboard being unplugged clears the mapping.
+            FnKeyMode.reapplyIfNeeded()
+            let live = FnKeyMode.isFunctionKeyMode
+            DispatchQueue.main.async { [weak self] in self?.render(functionKeys: live) }
+        }
     }
 
     // MARK: - Display
@@ -79,8 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             : "Shortcut: \(HotKeyCenter.display) is taken by another app"
         button.toolTip = """
             FKeys — function key switcher
-            Switches F1 to F12 between plain function keys and the printed \
-            media and brightness controls.
+            Swaps the top row so F1 to F12 work on their own, with brightness, \
+            volume and the rest still available on fn.
             \(now)
             Click to switch to \(target).
             \(shortcut)
@@ -90,7 +91,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func externalChange() {
-        refreshFromHardware()
+        // Waking, or a keyboard reconnecting, can wipe the mapping.
+        DispatchQueue.global(qos: .utility).async {
+            FnKeyMode.reapplyIfNeeded()
+            let live = FnKeyMode.isFunctionKeyMode
+            DispatchQueue.main.async { [weak self] in self?.render(functionKeys: live) }
+        }
     }
 
     // MARK: - Actions
@@ -117,12 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "The function keys did not change"
         alert.informativeText = """
-            FKeys wrote the setting but the keyboard reported back a different \
-            value, so nothing really changed.
+            FKeys asked hidutil to change the key mapping, but reading it back \
+            gave a different answer, so nothing really changed.
 
-            Copy the diagnostics and send them on: they say which layer \
-            answered and which stayed silent, which is the only way to tell \
-            what this Mac wants.
+            Copy the diagnostics and send them on.
             """
         alert.addButton(withTitle: "Copy diagnostics")
         alert.addButton(withTitle: "Close")
@@ -163,11 +167,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 action: #selector(menuDiagnostics), keyEquivalent: "")
         diag.target = self
 
-        if !HIDSafety.disabledStages.isEmpty {
-            let reenable = menu.addItem(withTitle: "Retry disabled keyboard methods",
-                                        action: #selector(menuReenable), keyEquivalent: "")
-            reenable.target = self
-        }
+        let reapply = menu.addItem(withTitle: "Re-apply mapping",
+                                   action: #selector(menuReenable), keyEquivalent: "")
+        reapply.target = self
         let about = menu.addItem(withTitle: "About FKeys", action: #selector(menuAbout), keyEquivalent: "")
         about.target = self
         let quit = menu.addItem(withTitle: "Quit FKeys", action: #selector(menuQuit), keyEquivalent: "q")
@@ -175,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Fill the state line from the instant local value, then let the
         // background read correct it. The menu must never wait on HID.
-        render(functionKeys: FnKeyMode.storedPreference)
+        render(functionKeys: FnKeyMode.desiredFunctionKeys)
         refreshFromHardware()
 
         // Attaching the menu and clicking is the supported way to pop a menu
@@ -193,8 +195,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func menuDiagnostics() { copyDiagnostics() }
 
     @objc private func menuReenable() {
-        HIDSafety.reset()
-        refreshFromHardware()
+        DispatchQueue.global(qos: .userInitiated).async {
+            _ = FnKeyMode.set(FnKeyMode.desiredFunctionKeys)
+            let live = FnKeyMode.isFunctionKeyMode
+            DispatchQueue.main.async { [weak self] in self?.render(functionKeys: live) }
+        }
     }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 
