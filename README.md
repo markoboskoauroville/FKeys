@@ -10,6 +10,9 @@ Both letters are white.
 
 Left click the letter to switch. Right click for the menu.
 
+Or press **⌃⌥⌘K** from anywhere. Hovering the letter shows the shortcut along
+with what the keys currently do.
+
 ## Install
 
 ```
@@ -27,6 +30,10 @@ None. FKeys needs no Accessibility grant, no Input Monitoring, no root.
 It talks to the keyboard driver through IOKit the same way the System Settings
 checkbox does, rather than using AppleScript to click that checkbox, which only
 works on an English system.
+
+The ⌃⌥⌘K shortcut is a registered hotkey, not a keyboard monitor. FKeys asks the
+window server to deliver that one combination and never sees any other keystroke,
+which is why it still needs no Accessibility or Input Monitoring grant.
 
 ## How it works
 

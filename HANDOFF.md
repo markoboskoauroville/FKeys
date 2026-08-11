@@ -24,6 +24,18 @@ system, and breaks whenever Apple rearranges the pane.
 
 No Accessibility permission, no Input Monitoring, no root.
 
+## Hotkey
+
+⌃⌥⌘K toggles, via Carbon `RegisterEventHotKey` in `HotKeyCenter`.
+
+**Never replace this with a CGEvent tap.** A tap sees every keystroke on the
+system and requires Accessibility permission, which would throw away the app's
+one real selling point. A registered hotkey receives that combination only.
+
+If another app already owns the combination, registration fails, `isRegistered`
+goes false, and the tooltip says so. Clicking still works, so this is never an
+alert.
+
 ## Distribution
 
 Repo is **public on purpose**, so a Homebrew **cask** can download the release

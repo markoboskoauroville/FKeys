@@ -34,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self, selector: #selector(externalChange),
             name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
 
+        HotKeyCenter.shared.onTrigger = { [weak self] in self?.toggle() }
+        HotKeyCenter.shared.start()
+
         refresh()
     }
 
@@ -50,9 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .bold),
             .foregroundColor: AppDelegate.letterColor
         ])
-        button.toolTip = fn
-            ? "F1 to F12 are function keys. Click for media controls."
-            : "F1 to F12 are media and brightness controls. Click for function keys."
+        let target = fn ? "media and brightness controls" : "function keys"
+        let now = fn ? "F1 to F12 are function keys."
+                     : "F1 to F12 are media and brightness controls."
+        if HotKeyCenter.shared.isRegistered {
+            button.toolTip = "\(now)\nClick, or press \(HotKeyCenter.display), to switch to \(target)."
+        } else {
+            button.toolTip = "\(now)\nClick to switch to \(target).\n"
+                + "\(HotKeyCenter.display) is taken by another app."
+        }
 
         stateItem?.title = fn ? "F, function keys" : "C, media controls"
     }
@@ -98,7 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let toggleItem = menu.addItem(withTitle: "Switch mode",
-                                      action: #selector(menuToggle), keyEquivalent: "")
+                                      action: #selector(menuToggle), keyEquivalent: "k")
+        toggleItem.keyEquivalentModifierMask = [.control, .option, .command]
         toggleItem.target = self
 
         let login = menu.addItem(withTitle: "Open at login",
