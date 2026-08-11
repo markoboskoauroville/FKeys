@@ -52,6 +52,10 @@ ad-hoc signed rather than notarized and macOS would otherwise refuse to open it.
 
 ## Open
 
-- The menu bar letter is monospaced system font. If a specific typeface is
-  wanted it has to be bundled into the app and registered at runtime.
+- The menu bar letter is monospaced system font, white in both states. It is a
+  plain white, not `labelColor`, so it does not follow the appearance setting.
+  On a light menu bar it will be hard to read. Switch `letterColor` to
+  `NSColor.labelColor` if that ever becomes a problem.
+- If a specific typeface is wanted it has to be bundled into the app and
+  registered at runtime.
 - No preferences window. Everything is the right click menu.

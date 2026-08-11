@@ -3,8 +3,10 @@
 Switch the F1 to F12 keys between function keys and media controls with one
 click in the menu bar.
 
-- **F** in dark orange means F1 to F12 are plain function keys.
+- **F** means F1 to F12 are plain function keys.
 - **C** means they are the printed controls: brightness, volume, playback.
+
+Both letters are white.
 
 Left click the letter to switch. Right click for the menu.
 

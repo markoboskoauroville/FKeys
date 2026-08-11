@@ -8,8 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var stateItem: NSMenuItem?
 
-    /// Dark orange, the same accent used across Mantra tools.
-    private static let accent = NSColor(srgbRed: 0.82, green: 0.41, blue: 0.12, alpha: 1)
+    /// The letter is white in both states.
+    private static let letterColor = NSColor.white
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -40,8 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Display
 
     /// F when F1-F12 are plain function keys, C when they are the printed
-    /// controls. Dark orange marks F, because that is the state you switched
-    /// deliberately into; C is the Mac default and stays quiet.
+    /// controls. Both letters are white; the letter itself carries the state.
     private func refresh() {
         guard let button = statusItem.button else { return }
         let fn = FnKeyMode.isFunctionKeyMode
@@ -49,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         button.attributedTitle = NSAttributedString(string: letter, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .bold),
-            .foregroundColor: fn ? AppDelegate.accent : NSColor.labelColor
+            .foregroundColor: AppDelegate.letterColor
         ])
         button.toolTip = fn
             ? "F1 to F12 are function keys. Click for media controls."
