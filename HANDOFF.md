@@ -3,7 +3,34 @@
 Public repo. macOS menu bar app, one click switches F1-F12 between function
 keys and media controls.
 
-## The mechanism, and why the obvious routes fail
+## Three layers, only one of which works on Apple Silicon
+
+**IOHIDSystem accepts the write, returns KERN_SUCCESS, and does nothing.** That
+was the original implementation and it shipped broken: the menu bar letter
+flipped because the preference write succeeded, while the keyboard never
+changed. A success return code from this API proves nothing.
+
+Current order of attempts in `FnKeyMode.set`:
+
+1. `HIDServices` — `IOHIDEventSystemClient` / `IOHIDServiceClientSetProperty`,
+   per keyboard service. This is the layer System Settings uses and the one that
+   works on Apple Silicon. The symbols are not in any public header, so they are
+   resolved with `dlsym` and `isAvailable` guards the fallback.
+2. `HIDDevices` — public `IOHIDManager`, same `HIDFKeyMode` property on the
+   device. **Never call `IOHIDManagerOpen`**: enumerating needs no permission,
+   opening triggers the Input Monitoring prompt and would cost FKeys its one
+   real advantage.
+3. `IOHIDSystem` — legacy, kept only for older Intel Macs.
+
+**Nothing trusts a return code.** `set` reads the value back out of the hardware
+and reports failure when the read back disagrees. `isFunctionKeyMode` also reads
+from hardware first and only falls back to the stored preference when no
+keyboard answers, so the letter cannot drift away from reality.
+
+`Copy diagnostics` in the menu reports which layer answered. That is the first
+thing to ask for when someone says it does not work.
+
+## The preference, and why it is not enough
 
 `defaults write -g com.apple.keyboard.fnState` **does not work on its own.** It
 writes the preference but nothing reads it until the next login. Every "why

@@ -54,14 +54,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .foregroundColor: AppDelegate.letterColor
         ])
         let target = fn ? "media and brightness controls" : "function keys"
-        let now = fn ? "F1 to F12 are function keys."
-                     : "F1 to F12 are media and brightness controls."
-        if HotKeyCenter.shared.isRegistered {
-            button.toolTip = "\(now)\nClick, or press \(HotKeyCenter.display), to switch to \(target)."
-        } else {
-            button.toolTip = "\(now)\nClick to switch to \(target).\n"
-                + "\(HotKeyCenter.display) is taken by another app."
-        }
+        let now = fn ? "Now: F1 to F12 are function keys."
+                     : "Now: F1 to F12 are media and brightness controls."
+        let shortcut = HotKeyCenter.shared.isRegistered
+            ? "Shortcut: \(HotKeyCenter.display)"
+            : "Shortcut: \(HotKeyCenter.display) is taken by another app"
+        button.toolTip = """
+            FKeys — function key switcher
+            Switches F1 to F12 between plain function keys and the printed \
+            media and brightness controls.
+            \(now)
+            Click to switch to \(target).
+            \(shortcut)
+            """
 
         stateItem?.title = fn ? "F, function keys" : "C, media controls"
     }
@@ -80,18 +85,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func toggle() {
-        if !FnKeyMode.toggle() {
-            let alert = NSAlert()
-            alert.messageText = "Could not change the function key mode"
-            alert.informativeText = """
-                FKeys could not reach the keyboard driver. This usually means \
-                macOS refused the connection to IOHIDSystem. Changing the \
-                setting once by hand in System Settings, Keyboard, and then \
-                trying again normally clears it.
-                """
-            alert.runModal()
-        }
+        let outcome = FnKeyMode.toggle()
         refresh()
+        guard !outcome.succeeded else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "The function keys did not change"
+        alert.informativeText = """
+            FKeys wrote the setting but the keyboard reported back a different \
+            value, so nothing really changed.
+
+            Copy the diagnostics and send them on: they say which layer \
+            answered and which stayed silent, which is the only way to tell \
+            what this Mac wants.
+            """
+        alert.addButton(withTitle: "Copy diagnostics")
+        alert.addButton(withTitle: "Close")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { copyDiagnostics() }
+    }
+
+    private func copyDiagnostics() {
+        let report = FnKeyMode.diagnostics()
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report, forType: .string)
     }
 
     // MARK: - Menu
@@ -117,6 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         login.state = LoginItem.isEnabled ? .on : .off
 
         menu.addItem(.separator())
+        let diag = menu.addItem(withTitle: "Copy diagnostics",
+                                action: #selector(menuDiagnostics), keyEquivalent: "")
+        diag.target = self
         let about = menu.addItem(withTitle: "About FKeys", action: #selector(menuAbout), keyEquivalent: "")
         about.target = self
         let quit = menu.addItem(withTitle: "Quit FKeys", action: #selector(menuQuit), keyEquivalent: "q")
@@ -136,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func menuToggle() { toggle() }
+    @objc private func menuDiagnostics() { copyDiagnostics() }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 
     @objc private func menuLogin() {

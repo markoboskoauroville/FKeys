@@ -37,16 +37,20 @@ which is why it still needs no Accessibility or Input Monitoring grant.
 
 ## How it works
 
-A change has to happen in three places to be both immediate and permanent:
-
-1. `IOConnectSetCFProperty` on the IOHIDSystem service applies it to the
-   hardware straight away.
-2. `CFPreferences` writes `com.apple.keyboard.fnState` so it survives a reboot
-   and so System Settings agrees.
-3. A distributed notification tells anything already running to re-read it.
+The setting is written per keyboard through `IOHIDEventSystemClient`, the same
+layer System Settings uses, then persisted to `com.apple.keyboard.fnState` and
+announced with a distributed notification so anything already running re-reads
+it.
 
 This is why `defaults write com.apple.keyboard.fnState` on its own appears to do
-nothing until the next login. It does step 2 and skips step 1.
+nothing until the next login: it persists the value without ever telling the
+keyboard.
+
+The older `IOHIDSystem` route that most examples online use is worse than
+useless on Apple Silicon. It accepts the write, returns success, and changes
+nothing. FKeys therefore never trusts a return code: after writing it reads the
+value back out of the hardware, and says so plainly when the two disagree.
+`Copy diagnostics` in the menu reports which layer answered.
 
 FKeys also re-reads the setting after waking from sleep and whenever anything
 else changes it, so the letter never lies.
