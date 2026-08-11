@@ -1,0 +1,39 @@
+name: Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and publish FKeys.app
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build app bundle
+        run: VERSION=1.0.${{ github.run_number }} BUILD=${{ github.run_number }} ./scripts/build_app.sh
+
+      - name: Zip the bundle
+        run: |
+          cd packaging
+          ditto -c -k --sequesterRsrc --keepParent FKeys.app ../FKeys.zip
+
+      - name: Publish to the rolling latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A single rolling tag on purpose: the Homebrew cask points at a fixed
+          # download URL, so the asset name and tag must never change.
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest FKeys.zip \
+            --title "FKeys latest" \
+            --notes "Rolling build 1.0.${{ github.run_number }}. Installed by the Homebrew cask."

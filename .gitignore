@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+packaging/FKeys.app/
+packaging/*.icns
+packaging/FKeys.iconset/
+packaging/*.zip
