@@ -14,6 +14,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
+        // Before anything else: if the last launch died inside the private HID
+        // path, turn that path off so this launch survives.
+        HIDSafety.inspectPreviousRun()
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.target = self
         item.button?.action = #selector(buttonClicked)
@@ -158,6 +162,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let diag = menu.addItem(withTitle: "Copy diagnostics",
                                 action: #selector(menuDiagnostics), keyEquivalent: "")
         diag.target = self
+
+        if HIDSafety.privatePathDisabled {
+            let reenable = menu.addItem(withTitle: "Retry advanced keyboard access",
+                                        action: #selector(menuReenable), keyEquivalent: "")
+            reenable.target = self
+        }
         let about = menu.addItem(withTitle: "About FKeys", action: #selector(menuAbout), keyEquivalent: "")
         about.target = self
         let quit = menu.addItem(withTitle: "Quit FKeys", action: #selector(menuQuit), keyEquivalent: "q")
@@ -181,6 +191,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func menuToggle() { toggle() }
     @objc private func menuDiagnostics() { copyDiagnostics() }
+
+    @objc private func menuReenable() {
+        HIDSafety.reenable()
+        refreshFromHardware()
+    }
     @objc private func menuQuit() { NSApp.terminate(nil) }
 
     @objc private func menuLogin() {

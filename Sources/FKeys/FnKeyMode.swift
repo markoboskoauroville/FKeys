@@ -130,6 +130,7 @@ enum FnKeyMode {
         var lines: [String] = ["FKeys diagnostics"]
         lines.append("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         lines.append("event system symbols available: \(HIDServices.isAvailable)")
+        lines.append("private path disabled after a crash: \(HIDSafety.privatePathDisabled)")
         lines.append("keyboard services seen: \(HIDServices.keyboardCount())")
         lines.append("hid manager keyboards seen: \(HIDDevices.keyboardCount())")
         lines.append("service reports: \(describe(HIDServices.fKeyMode()))")

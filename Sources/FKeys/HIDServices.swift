@@ -39,12 +39,22 @@ enum HIDServices {
         symbol("IOHIDServiceClientConformsTo", as: ServiceConformsTo.self)
 
     static var isAvailable: Bool {
-        createClient != nil && copyServices != nil && setProperty != nil
+        !HIDSafety.privatePathDisabled
+            && createClient != nil && copyServices != nil && setProperty != nil
     }
 
     /// Keyboard services only: usage page 1 (generic desktop), usage 6 (keyboard).
+    ///
+    /// Every entry point into the private symbols goes through HIDSafety, so a
+    /// crash in here disables this whole path on the next launch instead of
+    /// leaving an app that cannot start.
     private static func keyboardServices() -> [CFTypeRef] {
-        guard let createClient, let copyServices,
+        HIDSafety.guarded(fallback: []) { unguardedKeyboardServices() }
+    }
+
+    private static func unguardedKeyboardServices() -> [CFTypeRef] {
+        guard !HIDSafety.privatePathDisabled,
+              let createClient, let copyServices,
               let client = createClient(kCFAllocatorDefault)?.takeRetainedValue(),
               let all = copyServices(client)?.takeRetainedValue() as? [CFTypeRef]
         else { return [] }

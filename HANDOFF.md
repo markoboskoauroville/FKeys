@@ -3,6 +3,22 @@
 Public repo. macOS menu bar app, one click switches F1-F12 between function
 keys and media controls.
 
+## The crash fuse
+
+`HIDSafety` writes a flag to `UserDefaults` and forces it to disk immediately
+before entering the private symbol path, and clears it immediately after. If the
+flag is still set at the next launch, the app did not survive the last attempt,
+so the private path is disabled permanently and only the public `IOHIDManager`
+and legacy routes are used.
+
+This exists because a menu bar app that dies at launch leaves nothing to click
+and no way out. Worst case FKeys crashes once and then heals itself. The menu
+offers `Retry advanced keyboard access` to undo the fuse after a fix ships, and
+diagnostics report whether it tripped.
+
+`HIDSafety.inspectPreviousRun()` must stay the first statement in
+`applicationDidFinishLaunching`, before anything can touch HID.
+
 ## Never touch HID on the launch path
 
 **The status item must have a visible title before any HID call happens.**
