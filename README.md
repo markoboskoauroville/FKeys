@@ -1,3 +1,5 @@
+### [Download the latest build](https://github.com/markoboskoauroville/FKeys/releases/latest)
+
 # FKeys
 
 Switch the F1 to F12 keys between function keys and media controls with one
